@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALL YOU CAN SATLE</title>
+<meta name="description" content="Endless satellite city guessing. No daily puzzle, no waiting — one round after another until you're full.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #07090d;
+    color: #eef2f7;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .55rem .9rem;
+    border-bottom: 1px solid #1c222c;
+    background: #0b0f15;
+  }
+  header h1 {
+    font-size: clamp(.95rem, 3.4vw, 1.25rem);
+    font-weight: 900;
+    letter-spacing: -.02em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  header h1 span { color: #f2b632; }
+  .stats {
+    margin-left: auto;
+    display: flex;
+    gap: .9rem;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #7d8899;
+    white-space: nowrap;
+  }
+  .stats b { display: block; font-size: 1rem; color: #eef2f7; letter-spacing: 0; }
+
+  /* The map fills everything below the header; the controls float on top of it. */
+  main {
+    flex: 1 1 auto;
+    position: relative;
+    min-height: 0;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: #10151d;
+    /* Own every gesture: the page itself never scrolls, so browser pan/double-tap
+       zoom would only fight the map's own pinch and drag handling. */
+    touch-action: none;
+  }
+  #map.zoomed { cursor: grab; }
+  #map.zoomed.dragging { cursor: grabbing; }
+  /* Holds the imagery layers and carries the player's own pan/magnify transform,
+     kept separate from the per-layer transforms the level cross-fade animates. */
+  #mapView {
+    position: absolute;
+    inset: 0;
+    transform-origin: center;
+    will-change: transform;
+  }
+  #mapView.animating { transition: transform 260ms cubic-bezier(.4, 0, .2, 1); }
+  /* Drawn as background images rather than <img> elements: hover-preview extensions
+     (Imagus and friends) latch onto img tags and pop the full-resolution tile, which
+     hands over the answer. pointer-events keeps them out of the hover path too. */
+  #map .map-layer {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    transform-origin: center;
+    will-change: transform;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #map .map-layer.transitioning {
+    transition: transform 700ms cubic-bezier(.4, 0, .2, 1);
+  }
+  /* An ID rule outranks the UA stylesheet's [hidden]{display:none}, so spell it out. */
+  #mapNote[hidden] { display: none; }
+  #mapNote {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    color: #8b95a5;
+    font-size: .95rem;
+    z-index: 3;
+  }
+  /* Top of the map — the bottom belongs to the floating pills and guess box now. */
+  #zoomPips {
+    position: absolute;
+    left: .6rem;
+    top: .6rem;
+    display: flex;
+    gap: .28rem;
+    padding: .35rem .5rem;
+    border-radius: 999px;
+    background: rgba(7, 9, 13, .62);
+    backdrop-filter: blur(4px);
+    z-index: 4;  /* layers are appended after this, so claim the stacking order */
+  }
+  #zoomPips i {
+    width: 1.15rem;
+    height: .22rem;
+    border-radius: 999px;
+    background: #39424f;
+  }
+  #zoomPips i.used { background: #f2b632; }
+  /* Once the round is over the pips stop counting guesses and start driving the
+     zoom, so they grow into something worth tapping. */
+  body.roundover #zoomPips { padding: .45rem .5rem; }
+  body.roundover #zoomPips i { height: .4rem; cursor: pointer; }
+  #zoomPips i.current { background: #f2b632; }
+
+  #zoomCtl {
+    position: absolute;
+    right: .6rem;
+    top: .6rem;
+    display: flex;
+    gap: .3rem;
+    z-index: 4;
+  }
+  #zoomCtl button {
+    width: 2.1rem;
+    height: 2.1rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(7, 9, 13, .62);
+    backdrop-filter: blur(4px);
+    color: #eef2f7;
+    font-size: 1.25rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+  #zoomCtl button:disabled { opacity: .3; }
+
+  .panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: .7rem .75rem .85rem;
+    background: linear-gradient(to top, rgba(7, 9, 13, .8), rgba(7, 9, 13, .45) 55%, rgba(7, 9, 13, 0));
+  }
+
+  #guesses {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: .4rem;
+    margin-bottom: .55rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* Centred while they fit; "safe" falls back to flex-start once they overflow,
+       so the newest pill can't end up scrolled off the unreachable left edge. */
+    justify-content: center;
+    justify-content: safe center;
+  }
+  #guesses::-webkit-scrollbar { display: none; }
+  #guesses:empty { display: none; }
+  .guess {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .55rem .95rem;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, .7);
+    background: rgba(0, 0, 0, .72);
+    color: #fff;
+    font-size: .85rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    animation: pop .25s ease-out;
+  }
+  @keyframes pop {
+    from { transform: scale(.85); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .guess.wrong { background: rgba(163, 22, 33, .82); }
+  .guess.right { background: rgba(6, 214, 160, .82); color: #05231c; border-color: rgba(255, 255, 255, .85); }
+  .guess.reveal { background: rgba(242, 182, 50, .88); color: #241a03; border-color: rgba(255, 255, 255, .85); }
+
+  form {
+    display: flex;
+    gap: .45rem;
+    position: relative;
+  }
+  input[type="text"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: .7rem .8rem;
+    border: 1px solid rgba(255, 255, 255, .55);
+    border-radius: .5rem;
+    background: rgba(0, 0, 0, .72);
+    color: #fff;
+    font-size: 1rem;
+    font-family: inherit;
+  }
+  input[type="text"]::placeholder { color: #a7b0bd; }
+  input[type="text"]:focus { outline: none; border-color: #f2b632; }
+  button {
+    flex: 0 0 auto;
+    padding: .7rem 1.05rem;
+    border: 0;
+    border-radius: .45rem;
+    background: #f2b632;
+    color: #07090d;
+    font-size: .85rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: default; }
+  button.ghost { background: #263040; color: #eef2f7; }
+
+  #suggest {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + .35rem);
+    max-height: 42vh;
+    overflow-y: auto;
+    background: rgba(10, 13, 18, .93);
+    border: 1px solid rgba(255, 255, 255, .35);
+    border-radius: .5rem;
+    z-index: 20;
+    display: none;
+  }
+  #suggest.open { display: block; }
+  #suggest div {
+    padding: .6rem .75rem;
+    font-size: .92rem;
+    cursor: pointer;
+    border-bottom: 1px solid #1c222c;
+  }
+  #suggest div:last-child { border-bottom: 0; }
+  #suggest div.active, #suggest div:hover { background: #263040; }
+
+  body.roundover #guessForm { display: none; }
+
+  #result { display: none; }
+  #result.show {
+    display: block;
+    padding: .7rem .8rem .8rem;
+    border-radius: .6rem;
+    border: 1px solid rgba(255, 255, 255, .28);
+    background: rgba(10, 13, 18, .9);
+  }
+  #result .verdict {
+    font-size: 1.05rem;
+    font-weight: 800;
+    margin-bottom: .2rem;
+  }
+  #result .verdict.win { color: #63d68a; }
+  #result .verdict.lose { color: #f2726f; }
+  #result .answer { font-size: .95rem; margin-bottom: .3rem; }
+  #result .hint {
+    font-size: .72rem;
+    color: #7d8899;
+    margin-bottom: .5rem;
+  }
+  #result .blurb {
+    font-size: .82rem;
+    color: #9aa5b5;
+    line-height: 1.4;
+    max-height: 7.5em;
+    overflow-y: auto;
+    margin-bottom: .55rem;
+  }
+  #result .actions { display: flex; gap: .45rem; }
+  #result a.maplink {
+    display: inline-flex;
+    align-items: center;
+    padding: .7rem 1rem;
+    border-radius: .45rem;
+    background: #263040;
+    color: #eef2f7;
+    font-size: .85rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    text-decoration: none;
+  }
+  #result button { flex: 1 1 auto; }
+
+  footer {
+    flex: 0 0 auto;
+    padding: .35rem .7rem .5rem;
+    text-align: center;
+    font-size: .68rem;
+    color: #5d6675;
+    background: #0b0f15;
+  }
+  footer a { color: #7d8899; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>All You Can <span>Satle</span></h1>
+  <div class="stats">
+    <div>Played<b id="statPlayed">0</b></div>
+    <div>Won<b id="statWon">0</b></div>
+    <div>Streak<b id="statStreak">0</b></div>
+  </div>
+</header>
+
+<main>
+  <div id="map">
+    <div id="mapView"></div>
+    <div id="mapNote">Loading satellites&hellip;</div>
+    <div id="zoomPips" hidden></div>
+    <div id="zoomCtl">
+      <button type="button" id="zoomOutBtn" aria-label="Zoom out">&minus;</button>
+      <button type="button" id="zoomInBtn" aria-label="Zoom in">+</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div id="guesses"></div>
+
+    <form id="guessForm" autocomplete="off">
+      <div id="suggest"></div>
+      <input type="text" id="guessInput" placeholder="Guess the city&hellip;" disabled
+             autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button type="submit" id="submitBtn" disabled>Guess</button>
+    </form>
+
+    <div id="result">
+      <div class="verdict" id="verdict"></div>
+      <div class="answer" id="answer"></div>
+      <div class="hint">Scroll, pinch, drag or use &plus;&thinsp;/&thinsp;&minus; to explore the map.</div>
+      <div class="blurb" id="blurb"></div>
+      <div class="actions">
+        <button type="button" id="againBtn">Another one</button>
+        <a class="maplink" id="mapLink" target="_blank" rel="noopener">Map</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ---------- lz-string (decompressFromUTF16), vendored from pieroxy/lz-string (MIT) ---------- */
+var LZ = (function () {
+  var f = String.fromCharCode;
+  function _decompress(length, resetValue, getNextValue) {
+    var dictionary = [], enlargeIn = 4, dictSize = 4, numBits = 3, entry = "",
+        result = [], i, w, bits, resb, maxpower, power, c,
+        data = { val: getNextValue(0), position: resetValue, index: 1 };
+
+    for (i = 0; i < 3; i += 1) dictionary[i] = i;
+
+    bits = 0; maxpower = Math.pow(2, 2); power = 1;
+    while (power != maxpower) {
+      resb = data.val & data.position;
+      data.position >>= 1;
+      if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+      bits |= (resb > 0 ? 1 : 0) * power;
+      power <<= 1;
+    }
+
+    switch (bits) {
+      case 0:
+        bits = 0; maxpower = Math.pow(2, 8); power = 1;
+        while (power != maxpower) {
+          resb = data.val & data.position;
+          data.position >>= 1;
+          if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+          bits |= (resb > 0 ? 1 : 0) * power;
+          power <<= 1;
+        }
+        c = f(bits);
+        break;
+      case 1:
+        bits = 0; maxpower = Math.pow(2, 16); power = 1;
+        while (power != maxpower) {
+          resb = data.val & data.position;
+          data.position >>= 1;
+          if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+          bits |= (resb > 0 ? 1 : 0) * power;
+          power <<= 1;
+        }
+        c = f(bits);
+        break;
+      case 2:
+        return "";
+    }
+    dictionary[3] = c;
+    w = c;
+    result.push(c);
+
+    while (true) {
+      if (data.index > length) return "";
+
+      bits = 0; maxpower = Math.pow(2, numBits); power = 1;
+      while (power != maxpower) {
+        resb = data.val & data.position;
+        data.position >>= 1;
+        if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+        bits |= (resb > 0 ? 1 : 0) * power;
+        power <<= 1;
+      }
+
+      switch (c = bits) {
+        case 0:
+          bits = 0; maxpower = Math.pow(2, 8); power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power <<= 1;
+          }
+          dictionary[dictSize++] = f(bits);
+          c = dictSize - 1;
+          enlargeIn--;
+          break;
+        case 1:
+          bits = 0; maxpower = Math.pow(2, 16); power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) { data.position = resetValue; data.val = getNextValue(data.index++); }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power <<= 1;
+          }
+          dictionary[dictSize++] = f(bits);
+          c = dictSize - 1;
+          enlargeIn--;
+          break;
+        case 2:
+          return result.join('');
+      }
+
+      if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+
+      if (dictionary[c]) {
+        entry = dictionary[c];
+      } else if (c === dictSize) {
+        entry = w + w.charAt(0);
+      } else {
+        return null;
+      }
+      result.push(entry);
+
+      dictionary[dictSize++] = w + entry.charAt(0);
+      enlargeIn--;
+      w = entry;
+
+      if (enlargeIn == 0) { enlargeIn = Math.pow(2, numBits); numBits++; }
+    }
+  }
+
+  return {
+    decompressFromUTF16: function (compressed) {
+      if (compressed == null) return "";
+      if (compressed == "") return null;
+      return _decompress(compressed.length, 16384, function (index) {
+        return compressed.charCodeAt(index) - 32;
+      });
+    }
+  };
+})();
+
+/* ---------- config ---------- */
+// satle.ca renders six pre-baked images per puzzle, from tight (z0) to whole-region
+// (z5). A wrong guess buys the next one out. Zoom values are only used to work out
+// the scale factor when cross-fading between two layers.
+var ZOOMS = [18, 16, 14, 11, 8, 4];
+var MAX_GUESSES = ZOOMS.length;
+// Same-origin: Caddy proxies this path through to satle.ca, which serves the file
+// without CORS headers, so a direct cross-origin fetch would be blocked.
+var DATA_URL = '/satles-v2.lz';
+var IMG_BASE = 'https://satle.ca/maps';
+var CACHE_KEY = 'aycs-satles-encoded';
+var STATS_KEY = 'aycs-stats';
+
+var ARROWS = { N: '⬆', NE: '↗', E: '➡', SE: '↘', S: '⬇', SW: '↙', W: '⬅', NW: '↖' };
+
+/* ---------- state ---------- */
+var puzzles = [];   // every landmark, one of which is the round's answer
+var options = [];   // distinct "City, Country" entries the player can guess
+var answer = null;
+var guesses = [];
+var over = false;
+var zoomIndex = 0;
+var displayedIndex = 0;  // zoom index the on-screen layer was rendered at
+var activeLayer = null;
+var transitionId = 0;
+var recent = [];    // ids of the last few answers, to avoid immediate repeats
+
+var el = function (id) { return document.getElementById(id); };
+var mapEl = el('map'), viewEl = el('mapView'), noteEl = el('mapNote'), pipsEl = el('zoomPips');
+var inputEl = el('guessInput'), submitEl = el('submitBtn'), suggestEl = el('suggest');
+var guessesEl = el('guesses'), resultEl = el('result');
+
+/* ---------- geo helpers ---------- */
+function rad(d) { return d * Math.PI / 180; }
+function deg(r) { return r * 180 / Math.PI; }
+
+function distanceKm(a, b) {
+  var R = 6371;
+  var dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)));
+}
+
+// Rhumb-line bearing, so the arrow matches what you'd draw on a flat map.
+function bearing(a, b) {
+  var dLng = rad(b.lng - a.lng);
+  var dPhi = Math.log(Math.tan(rad(b.lat) / 2 + Math.PI / 4) / Math.tan(rad(a.lat) / 2 + Math.PI / 4));
+  if (Math.abs(dLng) > Math.PI) dLng = dLng > 0 ? -(2 * Math.PI - dLng) : (2 * Math.PI + dLng);
+  return (deg(Math.atan2(dLng, dPhi)) + 360) % 360;
+}
+
+function arrowTo(from, to) {
+  var b = bearing(from, to);
+  if (b > 337.5 || b <= 22.5) return ARROWS.N;
+  if (b <= 67.5) return ARROWS.NE;
+  if (b <= 112.5) return ARROWS.E;
+  if (b <= 157.5) return ARROWS.SE;
+  if (b <= 202.5) return ARROWS.S;
+  if (b <= 247.5) return ARROWS.SW;
+  if (b <= 292.5) return ARROWS.W;
+  return ARROWS.NW;
+}
+
+/* ---------- stats ---------- */
+function loadStats() {
+  try {
+    var s = JSON.parse(localStorage.getItem(STATS_KEY));
+    if (s && typeof s.played === 'number') return s;
+  } catch (e) {}
+  return { played: 0, won: 0, streak: 0 };
+}
+var stats = loadStats();
+
+function renderStats() {
+  el('statPlayed').textContent = stats.played;
+  el('statWon').textContent = stats.won;
+  el('statStreak').textContent = stats.streak;
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {}
+}
+
+/* ---------- data ---------- */
+function label(p) { return p.city + ', ' + p.country; }
+
+async function loadData() {
+  var text = null;
+  try {
+    var res = await fetch(DATA_URL);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    text = await res.text();
+    try { localStorage.setItem(CACHE_KEY, text); } catch (e) {}
+  } catch (e) {
+    // Fall back to the last good copy so a flaky network doesn't end the buffet.
+    text = localStorage.getItem(CACHE_KEY);
+    if (!text) throw e;
+  }
+
+  var data = JSON.parse(LZ.decompressFromUTF16(text));
+  puzzles = data.puzzles.filter(function (p) { return p && p.loc && p.city; });
+
+  // Several landmarks share a city, so collapse them for the guess list — the
+  // player is naming a city, not a building.
+  var seen = {};
+  options = [];
+  puzzles.forEach(function (p) {
+    var key = label(p).toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    options.push({ label: label(p), key: key, loc: p.loc });
+  });
+  options.sort(function (a, b) { return a.label.localeCompare(b.label); });
+}
+
+/* ---------- map ---------- */
+// Standing in for srcset, which only exists on <img>: pick the variant that covers
+// the map box at this device pixel ratio.
+function variant() {
+  var px = Math.max(mapEl.clientWidth, mapEl.clientHeight) * (window.devicePixelRatio || 1);
+  if (px <= 640) return 'sm';
+  if (px <= 1280) return 'md';
+  if (px <= 1920) return 'lg';
+  return 'xl';
+}
+
+function tileUrl(id, idx, v) {
+  return IMG_BASE + '/' + id + '/z' + idx + '-' + (v || variant()) + '.webp';
+}
+
+// Decode off-DOM, then hand the URL to a background-image layer — by then it's warm
+// in the HTTP cache, so the layer paints without a flash.
+function loadLayer(id, idx) {
+  return new Promise(function (resolve, reject) {
+    var url = tileUrl(id, idx);
+    var img = new Image();
+    img.onload = function () { resolve(url); };
+    img.onerror = function () { reject(new Error('z' + idx + ' failed')); };
+    img.src = url;
+    if (img.complete && img.naturalWidth) resolve(url);
+  });
+}
+
+function makeLayer(url) {
+  var div = document.createElement('div');
+  div.className = 'map-layer';
+  div.style.backgroundImage = 'url("' + url + '")';
+  return div;
+}
+
+function preload(id) {
+  for (var i = 0; i < ZOOMS.length; i++) new Image().src = tileUrl(id, i);
+}
+
+async function showZoom(idx) {
+  var id = answer.id;
+  var myTransition = ++transitionId;
+  // A new level covers different ground, so the player's own pan/magnify no longer
+  // means anything — hand them the fresh level framed as shot.
+  resetView(true);
+  var url;
+  try {
+    url = await loadLayer(id, idx);
+  } catch (e) {
+    noteEl.hidden = false;
+    noteEl.textContent = 'Map imagery failed to load. Try another one.';
+    return;
+  }
+  if (myTransition !== transitionId) return;
+
+  noteEl.hidden = true;
+  var layer = makeLayer(url);
+
+  if (!activeLayer) {
+    viewEl.appendChild(layer);
+    activeLayer = layer;
+    displayedIndex = idx;
+    maybeSharpen();
+    return;
+  }
+
+  // Zooming out by n levels means the new image covers 2^n as much ground. Start it
+  // blown up by that factor so it lines up with what's already on screen, then let
+  // both layers settle: the new one back to 1, the old one out to the same factor.
+  var factor = Math.pow(2, ZOOMS[displayedIndex] - ZOOMS[idx]);
+  var old = activeLayer;
+  layer.style.transform = 'scale(' + factor + ')';
+  viewEl.appendChild(layer);
+  activeLayer = layer;
+  displayedIndex = idx;
+  maybeSharpen();
+
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      layer.classList.add('transitioning');
+      layer.style.transform = 'scale(1)';
+      old.classList.add('transitioning');
+      old.style.transform = 'scale(' + (1 / factor) + ')';
+      old.style.opacity = '0';
+      setTimeout(function () {
+        if (old.parentNode) old.parentNode.removeChild(old);
+        layer.classList.remove('transitioning');
+      }, 720);
+    });
+  });
+}
+
+// Mid-round the pips count guesses spent; once it's over they become the zoom
+// scale, with the level you're looking at lit up.
+function renderPips() {
+  pipsEl.hidden = false;
+  pipsEl.textContent = '';
+  for (var i = 0; i < MAX_GUESSES; i++) {
+    var pip = document.createElement('i');
+    if (over) {
+      if (i === zoomIndex) pip.className = 'current';
+      if (i === 0) pip.title = 'Closest';
+      else if (i === MAX_GUESSES - 1) pip.title = 'Widest';
+    } else if (i < guesses.length) {
+      pip.className = 'used';
+    }
+    pipsEl.appendChild(pip);
+  }
+}
+
+/* ---------- zooming ---------- */
+// Two things share the word "zoom" here. Levels are the six baked images: stepping
+// between them shows more or less ground, so they only open up once the round is
+// over. Magnification is the player's own transform on top of whichever level is
+// on screen — no extra ground, just a closer look — so it is free at any time.
+var MAX_MAG = 6;
+var MAG_STEP = 1.7;
+var view = { s: 1, x: 0, y: 0 };
+var sharpened = null;   // "id:idx" whose layer already got the high-res swap
+
+function applyView(animate) {
+  viewEl.classList.toggle('animating', !!animate);
+  viewEl.style.transform = 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.s + ')';
+  mapEl.classList.toggle('zoomed', view.s > 1.001);
+}
+
+// The layer is background-size:cover, so at scale s there are (s-1)/2 box-widths of
+// slack on each side. Panning past that would drag empty backdrop into view.
+function clampView() {
+  var mx = (view.s - 1) * mapEl.clientWidth / 2;
+  var my = (view.s - 1) * mapEl.clientHeight / 2;
+  view.x = Math.max(-mx, Math.min(mx, view.x));
+  view.y = Math.max(-my, Math.min(my, view.y));
+}
+
+function resetView(animate) {
+  view.s = 1; view.x = 0; view.y = 0;
+  sharpened = null;
+  applyView(animate);
+  updateZoomButtons();
+}
+
+// Magnify to `target`, keeping the point under (px, py) — client coordinates, or
+// the centre of the map when omitted — pinned where it is.
+function setMag(target, px, py, animate) {
+  var r = mapEl.getBoundingClientRect();
+  var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  if (px == null) { px = cx; py = cy; }
+  var s = Math.max(1, Math.min(MAX_MAG, target));
+  var lx = (px - cx - view.x) / view.s, ly = (py - cy - view.y) / view.s;
+  view.x = px - cx - s * lx;
+  view.y = py - cy - s * ly;
+  view.s = s;
+  clampView();
+  applyView(animate);
+  updateZoomButtons();
+  maybeSharpen();
+}
+
+// Upscaling the layer the player is already looking at gets mushy fast, so once
+// they magnify, quietly swap in the largest baked variant of the *same* level. It
+// is more pixels of the same view, never more ground.
+function maybeSharpen() {
+  if (!answer || view.s < 1.5 || variant() === 'xl') return;
+  var key = answer.id + ':' + displayedIndex;
+  if (sharpened === key) return;
+  sharpened = key;
+  var url = tileUrl(answer.id, displayedIndex, 'xl');
+  var layer = activeLayer;
+  var img = new Image();
+  img.onload = function () {
+    if (activeLayer === layer && sharpened === key) layer.style.backgroundImage = 'url("' + url + '")';
+  };
+  img.src = url;
+}
+
+// Levels first, magnification after: while a wider level is on screen there is real
+// detail to be had by stepping in, and no point blowing up a blurry one instead.
+function zoomIn(px, py) {
+  if (over && zoomIndex > 0 && view.s <= 1.001) { setZoom(zoomIndex - 1); return; }
+  setMag(view.s * MAG_STEP, px, py, true);
+}
+
+function zoomOut(px, py) {
+  if (view.s > 1.001) { setMag(view.s / MAG_STEP, px, py, true); return; }
+  if (over) setZoom(zoomIndex + 1);
+}
+
+/* ---------- level stepping, once the round is over ---------- */
+// Only the six baked levels exist, so zooming steps between them and reuses the
+// same cross-fade. One step at a time: a step in flight parks the newest target
+// in pendingZoom rather than stacking half-finished transitions on top of it.
+var zoomBusy = false;
+var pendingZoom = null;
+
+function setZoom(idx) {
+  if (!over || !answer) return;
+  idx = Math.max(0, Math.min(MAX_GUESSES - 1, idx));
+  if (idx === zoomIndex) return;
+  zoomIndex = idx;
+  renderPips();
+  updateZoomButtons();
+  if (zoomBusy) { pendingZoom = idx; return; }
+  runZoom(idx);
+}
+
+function runZoom(idx) {
+  zoomBusy = true;
+  pendingZoom = null;
+  showZoom(idx).then(function () {
+    setTimeout(function () {
+      zoomBusy = false;
+      if (!over) { pendingZoom = null; return; }
+      if (pendingZoom !== null && pendingZoom !== displayedIndex) runZoom(pendingZoom);
+      else pendingZoom = null;
+    }, 740);
+  });
+}
+
+function updateZoomButtons() {
+  var canLevelIn = over && zoomIndex > 0;
+  var canLevelOut = over && zoomIndex < MAX_GUESSES - 1;
+  el('zoomInBtn').disabled = !answer || (!canLevelIn && view.s >= MAX_MAG - 0.01);
+  el('zoomOutBtn').disabled = !answer || (!canLevelOut && view.s <= 1.001);
+}
+
+el('zoomInBtn').addEventListener('click', function () { zoomIn(); });
+el('zoomOutBtn').addEventListener('click', function () { zoomOut(); });
+
+pipsEl.addEventListener('click', function (e) {
+  if (!over) return;
+  var pips = Array.prototype.slice.call(pipsEl.children);
+  var i = pips.indexOf(e.target);
+  if (i > -1) setZoom(i);
+});
+
+/* ---------- pointer, wheel and touch ---------- */
+// Magnification tracks the wheel continuously, but a level step is a 2x jump, so
+// those wait for a notch's worth of trackpad dribble to bank up first.
+var wheelAccum = 0, wheelAt = 0;
+function wheelNotch(delta) {
+  var now = Date.now();
+  if (now - wheelAt > 300) wheelAccum = 0;
+  wheelAt = now;
+  wheelAccum += delta;
+  if (Math.abs(wheelAccum) < 40) return false;
+  wheelAccum = 0;
+  return true;
+}
+
+mapEl.addEventListener('wheel', function (e) {
+  if (!answer) return;
+  e.preventDefault();
+  var atNative = view.s <= 1.001;
+  if (e.deltaY > 0 && atNative) {
+    if (over && wheelNotch(e.deltaY)) setZoom(zoomIndex + 1);
+    return;
+  }
+  if (e.deltaY < 0 && atNative && over && zoomIndex > 0) {
+    if (wheelNotch(e.deltaY)) setZoom(zoomIndex - 1);
+    return;
+  }
+  // deltaMode 1 is lines rather than pixels; roughly a line is 16px of intent.
+  var d = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
+  setMag(view.s * Math.pow(1.0018, -d), e.clientX, e.clientY, false);
+}, { passive: false });
+
+mapEl.addEventListener('dblclick', function (e) { zoomIn(e.clientX, e.clientY); });
+
+/* drag to pan (mouse) */
+var drag = null;
+mapEl.addEventListener('mousedown', function (e) {
+  if (view.s <= 1.001 || e.button !== 0) return;
+  e.preventDefault();
+  drag = { x: e.clientX, y: e.clientY };
+  mapEl.classList.add('dragging');
+});
+window.addEventListener('mousemove', function (e) {
+  if (!drag) return;
+  view.x += e.clientX - drag.x;
+  view.y += e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  clampView();
+  applyView(false);
+});
+window.addEventListener('mouseup', function () {
+  drag = null;
+  mapEl.classList.remove('dragging');
+});
+
+/* pinch to magnify, one finger to pan */
+function pinchDist(t) {
+  var dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+var pinch = null, pan = null;
+mapEl.addEventListener('touchstart', function (e) {
+  if (e.touches.length === 2) {
+    pan = null;
+    pinch = {
+      d: pinchDist(e.touches),
+      s: view.s,
+      x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+      y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+  } else if (e.touches.length === 1 && view.s > 1.001) {
+    pan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+}, { passive: true });
+
+mapEl.addEventListener('touchmove', function (e) {
+  if (pinch && e.touches.length === 2) {
+    e.preventDefault();
+    var d = pinchDist(e.touches);
+    var target = pinch.s * (d / pinch.d);
+    // At native size the pinch stops being a magnification and starts asking for the
+    // next level out (or in), so hand it over and rebase the gesture from there.
+    if (view.s <= 1.001 && over) {
+      if (target < 0.85) { setZoom(zoomIndex + 1); pinch.d = d; pinch.s = 1; return; }
+      if (target > 1.5 && zoomIndex > 0) { setZoom(zoomIndex - 1); pinch.d = d; pinch.s = 1; return; }
+    }
+    setMag(target, pinch.x, pinch.y, false);
+    return;
+  }
+  if (pan && e.touches.length === 1) {
+    e.preventDefault();
+    view.x += e.touches[0].clientX - pan.x;
+    view.y += e.touches[0].clientY - pan.y;
+    pan.x = e.touches[0].clientX; pan.y = e.touches[0].clientY;
+    clampView();
+    applyView(false);
+  }
+}, { passive: false });
+
+mapEl.addEventListener('touchend', function (e) {
+  if (e.touches.length < 2) pinch = null;
+  if (!e.touches.length) pan = null;
+  // Lifting one finger of a pinch leaves the other one able to pan straight on.
+  if (e.touches.length === 1 && view.s > 1.001) pan = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+
+/* ---------- rounds ---------- */
+function pickPuzzle() {
+  var pool = puzzles.filter(function (p) { return recent.indexOf(p.id) === -1; });
+  if (!pool.length) pool = puzzles;
+  var p = pool[Math.floor(Math.random() * pool.length)];
+  recent.push(p.id);
+  if (recent.length > 30) recent.shift();
+  return p;
+}
+
+function newRound() {
+  answer = pickPuzzle();
+  guesses = [];
+  over = false;
+  zoomIndex = 0;
+  transitionId++;
+  activeLayer = null;
+  zoomBusy = false;
+  pendingZoom = null;
+
+  mapEl.querySelectorAll('.map-layer').forEach(function (n) { n.remove(); });
+  resetView(false);
+  noteEl.hidden = false;
+  noteEl.textContent = 'Loading satellite…';
+
+  guessesEl.textContent = '';
+  resultEl.classList.remove('show');
+  document.body.classList.remove('roundover');
+  inputEl.value = '';
+  inputEl.disabled = false;
+  submitEl.disabled = false;
+  closeSuggest();
+  renderPips();
+  updateZoomButtons();
+
+  showZoom(0).then(function () { preload(answer.id); });
+  if (window.matchMedia('(hover: hover)').matches) inputEl.focus();
+}
+
+// A correct guess is just the city; a wrong one reads "8,755 km ➡ of Los Angeles".
+function addGuessPill(opt, correct) {
+  var pill = document.createElement('div');
+  pill.className = 'guess ' + (correct ? 'right' : 'wrong');
+  pill.textContent = correct
+    ? opt.label
+    : distanceKm(opt.loc, answer.loc).toLocaleString() + ' km ' +
+      arrowTo(opt.loc, answer.loc) + ' of ' + opt.label;
+
+  // Newest first, so the latest guess is always the leftmost pill.
+  guessesEl.insertBefore(pill, guessesEl.firstChild);
+  guessesEl.scrollLeft = 0;
+}
+
+function finish(won) {
+  over = true;
+  inputEl.disabled = true;
+  submitEl.disabled = true;
+  document.body.classList.add('roundover');
+  closeSuggest();
+
+  stats.played++;
+  if (won) { stats.won++; stats.streak++; } else { stats.streak = 0; }
+  renderStats();
+
+  var verdict = el('verdict');
+  verdict.className = 'verdict ' + (won ? 'win' : 'lose');
+  verdict.textContent = won
+    ? 'Got it in ' + guesses.length + (guesses.length === 1 ? ' guess!' : ' guesses!')
+    : 'Out of guesses.';
+
+  el('answer').innerHTML = '';
+  el('answer').textContent = (answer.emoji ? answer.emoji + ' ' : '') + answer.name + ' — ' + label(answer);
+  el('blurb').textContent = answer.description || '';
+  el('mapLink').href = 'https://www.google.com/maps/@' + answer.loc.lat + ',' + answer.loc.lng + ',14z/data=!3m1!1e3';
+
+  if (!won) {
+    var pill = document.createElement('div');
+    pill.className = 'guess reveal';
+    pill.textContent = label(answer);
+    guessesEl.insertBefore(pill, guessesEl.firstChild);
+    guessesEl.scrollLeft = 0;
+    // Show the full picture once the round is lost. Routed through runZoom so a
+    // player who starts zooming straight away queues behind this reveal.
+    zoomIndex = MAX_GUESSES - 1;
+    runZoom(zoomIndex);
+  }
+
+  renderPips();
+  updateZoomButtons();
+  resultEl.classList.add('show');
+  el('againBtn').focus();
+}
+
+function submitGuess(opt) {
+  if (over || !opt) return;
+  guesses.push(opt);
+  var correct = opt.key === label(answer).toLowerCase();
+  addGuessPill(opt, correct);
+  renderPips();
+  inputEl.value = '';
+  closeSuggest();
+
+  if (correct) { finish(true); return; }
+  if (guesses.length >= MAX_GUESSES) { finish(false); return; }
+
+  zoomIndex = guesses.length;
+  showZoom(zoomIndex);
+}
+
+/* ---------- autocomplete ---------- */
+var matches = [];
+var rows = [];      // the rendered suggestion elements, one per match
+var activeIdx = -1;
+
+function normalise(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function closeSuggest() {
+  suggestEl.classList.remove('open');
+  suggestEl.textContent = '';
+  matches = [];
+  rows = [];
+  activeIdx = -1;
+}
+
+function renderSuggest() {
+  suggestEl.textContent = '';
+  rows = [];
+  if (!matches.length) { suggestEl.classList.remove('open'); return; }
+  // The list is uncapped, so build it detached to keep a broad search snappy.
+  var frag = document.createDocumentFragment();
+  matches.forEach(function (m, i) {
+    var row = document.createElement('div');
+    row.textContent = m.label;
+    if (i === activeIdx) row.className = 'active';
+    row.addEventListener('mousedown', function (e) { e.preventDefault(); submitGuess(m); });
+    frag.appendChild(row);
+    rows.push(row);
+  });
+  suggestEl.appendChild(frag);
+  suggestEl.classList.add('open');
+  suggestEl.scrollTop = 0;
+}
+
+// Move the highlight without rebuilding the list, and keep it in the scroll view.
+function setActive(i) {
+  if (rows[activeIdx]) rows[activeIdx].className = '';
+  activeIdx = i;
+  var row = rows[activeIdx];
+  if (!row) return;
+  row.className = 'active';
+  if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+}
+
+function updateSuggest() {
+  var q = normalise(inputEl.value.trim());
+  if (!q) { closeSuggest(); return; }
+  var already = {};
+  guesses.forEach(function (g) { already[g.key] = true; });
+  var starts = [], contains = [];
+  for (var i = 0; i < options.length; i++) {
+    var o = options[i];
+    if (already[o.key]) continue;
+    var n = normalise(o.label);
+    if (n.indexOf(q) === 0) starts.push(o);
+    else if (n.indexOf(q) > -1) contains.push(o);
+  }
+  matches = starts.concat(contains);
+  activeIdx = matches.length ? 0 : -1;
+  renderSuggest();
+}
+
+inputEl.addEventListener('input', updateSuggest);
+inputEl.addEventListener('blur', function () { setTimeout(closeSuggest, 120); });
+inputEl.addEventListener('keydown', function (e) {
+  if (!matches.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); setActive((activeIdx + 1) % matches.length); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((activeIdx - 1 + matches.length) % matches.length); }
+  else if (e.key === 'Escape') { closeSuggest(); }
+});
+
+el('guessForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+  if (activeIdx > -1 && matches[activeIdx]) submitGuess(matches[activeIdx]);
+});
+
+el('againBtn').addEventListener('click', newRound);
+
+document.addEventListener('keydown', function (e) {
+  // Mid-round the guess box has focus, where a "-" is part of a city name.
+  if (e.target !== inputEl) {
+    if (e.key === '+' || e.key === '=' || e.key === 'ArrowUp') { e.preventDefault(); zoomIn(); return; }
+    if (e.key === '-' || e.key === '_' || e.key === 'ArrowDown') { e.preventDefault(); zoomOut(); return; }
+    if (e.key === '0') { e.preventDefault(); resetView(true); return; }
+  }
+  if (over && (e.key === 'Enter' || e.key === ' ')) {
+    if (document.activeElement === el('againBtn')) return;
+    e.preventDefault();
+    newRound();
+  }
+});
+
+// A big resize can call for a sharper variant; only reswap when it actually changes.
+var resizeTimer;
+var loadedVariant = variant();
+window.addEventListener('resize', function () {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function () {
+    if (!answer || variant() === loadedVariant) return;
+    loadedVariant = variant();
+    if (activeLayer) activeLayer.style.backgroundImage = 'url("' + tileUrl(answer.id, displayedIndex) + '")';
+    // That just undid any high-res swap, so earn it back if they are still zoomed in.
+    sharpened = null;
+    maybeSharpen();
+    clampView();
+    applyView(false);
+  }, 250);
+});
+
+/* ---------- go ---------- */
+renderStats();
+loadData().then(function () {
+  newRound();
+}).catch(function (e) {
+  noteEl.textContent = 'Could not load the puzzle data. ' + e.message;
+});
+</script>
+</body>
+</html>
