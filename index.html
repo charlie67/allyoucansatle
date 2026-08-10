@@ -48,6 +48,80 @@
   }
   .stats b { display: block; font-size: 1rem; color: #eef2f7; letter-spacing: 0; }
 
+  /* Continent control sits to the right of the stats */
+  #continentCtl {
+    margin-left: .6rem;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+  #continentSelect {
+    background: rgba(7,9,13,.62);
+    border: 1px solid rgba(255,255,255,.08);
+    color: #eef2f7;
+    padding: .35rem .5rem;
+    border-radius: .4rem;
+    font-size: .78rem;
+  }
+  #continentBtn { padding: .35rem .55rem; font-size: .78rem; }
+  /* Filter modal pills */
+  .filter-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: .45rem .6rem;
+    border-radius: .45rem;
+    background: rgba(7,9,13,.28);
+    color: #eef2f7;
+    border: 1px solid rgba(255,255,255,.06);
+    cursor: pointer;
+    font-size: .95rem;
+    text-align: center;
+    min-height: 2.5rem;
+  }
+  .filter-pill.selected {
+    background: #f2b632;
+    color: #07090d;
+    border-color: rgba(255,255,255,.9);
+  }
+   .continent-tab {
+     font-size: .88rem;
+     min-height: 2.65rem;
+   }
+  #filterModal {
+    background:#0b0f15;
+    border:1px solid #1c222c;
+    padding:1rem;
+    border-radius:.6rem;
+    min-width:min(980px, 92vw);
+    max-width:92vw;
+    max-height:84vh;
+    color:#eef2f7;
+    box-shadow:0 8px 30px rgba(0,0,0,.6);
+    display:flex;
+    flex-direction:column;
+    gap:.8rem;
+  }
+  #filterBody {
+    display:flex;
+    flex-direction:column;
+    gap:1rem;
+    overflow:auto;
+    padding-right:.2rem;
+  }
+  .filter-section h4 {
+    font-size:.78rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:#7d8899;
+    margin-bottom:.45rem;
+  }
+  .filter-grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(108px,1fr)); gap:.5rem; }
+  #continentList { grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); }
+  #countryList { grid-template-columns: repeat(auto-fit,minmax(96px,1fr)); }
+  #countryList .filter-pill { font-size: .82rem; min-height: 2.35rem; }
+  #filterFooter { display:flex; gap:.5rem; justify-content:flex-end; margin-top:.15rem; }
+
   /* The map fills everything below the header; the controls float on top of it. */
   main {
     flex: 1 1 auto;
@@ -333,6 +407,10 @@
     <div>Won<b id="statWon">0</b></div>
     <div>Streak<b id="statStreak">0</b></div>
   </div>
+  <div id="continentCtl" aria-label="Filter puzzles by continent">
+    <button id="continentBtn" class="ghost" type="button" aria-haspopup="dialog" aria-expanded="false">Filter</button>
+    <div id="continentSummary" style="font-size:.78rem;color:#7d8899;margin-left:.4rem">Any</div>
+  </div>
 </header>
 
 <main>
@@ -368,6 +446,31 @@
     </div>
   </div>
 </main>
+
+<!-- Filter modal: appears when the header Filter button is pressed -->
+<div id="filterOverlay" style="position:fixed;inset:0;background:rgba(2,6,12,.6);display:none;align-items:center;justify-content:center;z-index:60">
+  <div id="filterModal" role="dialog" aria-modal="true" aria-labelledby="filterTitle">
+    <h3 id="filterTitle" style="margin:0;font-size:1rem">Filter by continent or country</h3>
+    <div id="filterBody">
+      <section class="filter-section">
+        <h4>Continents</h4>
+        <div id="continentList" class="filter-grid"></div>
+      </section>
+       <section class="filter-section">
+         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.45rem">
+           <h4 style="margin:0">Countries</h4>
+           <button id="selectAllCountriesBtn" class="ghost" type="button" style="font-size:.7rem;padding:.25rem .4rem">Select All</button>
+         </div>
+         <div id="countryList" class="filter-grid"></div>
+       </section>
+    </div>
+    <div id="filterFooter">
+      <button id="filterClear" class="ghost" type="button">Clear</button>
+      <button id="filterCancel" class="ghost" type="button">Cancel</button>
+      <button id="filterApply" type="button">Apply</button>
+    </div>
+  </div>
+</div>
 
 <script>
 /* ---------- lz-string (decompressFromUTF16), vendored from pieroxy/lz-string (MIT) ---------- */
@@ -507,6 +610,466 @@ var STATS_KEY = 'aycs-stats';
 
 var ARROWS = { N: '⬆', NE: '↗', E: '➡', SE: '↘', S: '⬇', SW: '↙', W: '⬅', NW: '↖' };
 
+/* Country -> continent map (trimmed copy of country-continent-map.json's object)
+   Used to pick puzzles by continent. */
+var COUNTRY_CONTINENT = {
+  "United States": "North America",
+  "Belize": "North America",
+  "Japan": "Asia",
+  "Ghana": "Africa",
+  "Russia": "Europe",
+  "Peru": "South America",
+  "Croatia": "Europe",
+  "Luxembourg": "Europe",
+  "Algeria": "Africa",
+  "Egypt": "Africa",
+  "Bolivia": "South America",
+  "Mongolia": "Asia",
+  "Germany": "Europe",
+  "Myanmar": "Asia",
+  "Canada": "North America",
+  "France": "Europe",
+  "Brazil": "South America",
+  "England": "Europe",
+  "Hungary": "Europe",
+  "Vietnam": "Asia",
+  "United Arab Emirates": "Asia",
+  "Lebanon": "Asia",
+  "Cambodia": "Asia",
+  "Belgium": "Europe",
+  "Cameroon": "Africa",
+  "Bangladesh": "Asia",
+  "Estonia": "Europe",
+  "South Korea": "Asia",
+  "French Polynesia": "Oceania",
+  "Bulgaria": "Europe",
+  "Norway": "Europe",
+  "Costa Rica": "North America",
+  "Ecuador": "South America",
+  "Finland": "Europe",
+  "Spain": "Europe",
+  "Iran": "Asia",
+  "Sri Lanka": "Asia",
+  "Israel": "Asia",
+  "India": "Asia",
+  "Jamaica": "North America",
+  "Pakistan": "Asia",
+  "Belarus": "Europe",
+  "Panama": "North America",
+  "Italy": "Europe",
+  "Serbia": "Europe",
+  "Indonesia": "Asia",
+  "Thailand": "Asia",
+  "Portugal": "Europe",
+  "Nepal": "Asia",
+  "Azerbaijan": "Asia",
+  "Morocco": "Africa",
+  "Ethiopia": "Africa",
+  "Malaysia": "Asia",
+  "Angola": "Africa",
+  "Puerto Rico": "North America",
+  "Argentina": "South America",
+  "Ivory Coast": "Africa",
+  "Armenia": "Asia",
+  "Tunisia": "Africa",
+  "China": "Asia",
+  "Chile": "South America",
+  "Sweden": "Europe",
+  "Guyana": "South America",
+  "Netherlands": "Europe",
+  "Latvia": "Europe",
+  "Lithuania": "Europe",
+  "Guatemala": "North America",
+  "Venezuela": "South America",
+  "Poland": "Europe",
+  "Uruguay": "South America",
+  "Denmark": "Europe",
+  "Malta": "Europe",
+  "Libya": "Africa",
+  "Jordan": "Asia",
+  "Albania": "Europe",
+  "Turkey": "Asia",
+  "Greece": "Europe",
+  "Wales": "Europe",
+  "Dominican Republic": "North America",
+  "Trinidad and Tobago": "North America",
+  "Philippines": "Asia",
+  "Kenya": "Africa",
+  "Uganda": "Africa",
+  "DR Congo": "Africa",
+  "Colombia": "South America",
+  "Singapore": "Asia",
+  "Sudan": "Africa",
+  "Zimbabwe": "Africa",
+  "Rwanda": "Africa",
+  "Senegal": "Africa",
+  "Madagascar": "Africa",
+  "Mauritius": "Africa",
+  "Botswana": "Africa",
+  "Namibia": "Africa",
+  "Slovenia": "Europe",
+  "Montenegro": "Europe",
+  "North Macedonia": "Europe",
+  "Cyprus": "Europe",
+  "Monaco": "Europe",
+  "Paraguay": "South America",
+  "Suriname": "South America",
+  "El Salvador": "North America",
+  "Laos": "Asia",
+  "Bhutan": "Asia",
+  "Fiji": "Oceania",
+  "Maldives": "Asia",
+  "Nigeria": "Africa",
+  "Scotland": "Europe",
+  "Kazakhstan": "Asia",
+  "Uzbekistan": "Asia",
+  "Kyrgyzstan": "Asia",
+  "Turkmenistan": "Asia",
+  "Tajikistan": "Asia",
+  "Oman": "Asia",
+  "Qatar": "Asia",
+  "Kuwait": "Asia",
+  "Bahrain": "Asia",
+  "Iraq": "Asia",
+  "Haiti": "North America",
+  "Bahamas": "North America",
+  "Saint Lucia": "North America",
+  "Grenada": "North America",
+  "South Africa": "Africa",
+  "New Zealand": "Oceania",
+  "Switzerland": "Europe",
+  "Ireland": "Europe",
+  "Czech Republic": "Europe",
+  "Austria": "Europe",
+  "Iceland": "Europe",
+  "Afghanistan": "Asia",
+  "Barbados": "North America",
+  "Nicaragua": "North America",
+  "Bosnia and Herzegovina": "Europe",
+  "Honduras": "North America",
+  "Taiwan": "Asia",
+  "Ukraine": "Europe",
+  "Palestine": "Asia",
+  "Saudi Arabia": "Asia",
+  "Papua New Guinea": "Oceania",
+  "Australia": "Oceania",
+  "Cuba": "North America",
+  "Romania": "Europe",
+  "Mexico": "North America",
+  "Tanzania": "Africa"
+};
+
+function continentForCountry(country) {
+  if (!country) return null;
+  if (COUNTRY_CONTINENT[country]) return COUNTRY_CONTINENT[country];
+  var key = country.toLowerCase().trim();
+  for (var k in COUNTRY_CONTINENT) {
+    if (k.toLowerCase() === key) return COUNTRY_CONTINENT[k];
+  }
+  // try loose contains matching
+  for (var k2 in COUNTRY_CONTINENT) {
+    var a = k2.toLowerCase(), b = key;
+    if (a.indexOf(b) !== -1 || b.indexOf(a) !== -1) return COUNTRY_CONTINENT[k2];
+  }
+  return null;
+}
+
+// Known continents list. Multiple can be selected at once.
+var CONTINENTS = ["Africa","Asia","Europe","North America","South America","Oceania"];
+var FILTER_KEY = 'aycs-filter-country-selections';
+var SELECTED_CONTINENTS_KEY = 'aycs-filter-selected-continents';
+
+function saveContinentCountrySelections() {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify(continentCountrySelections)); } catch (e) {}
+}
+
+function loadContinentCountrySelections() {
+  try {
+    var v = localStorage.getItem(FILTER_KEY);
+    if (v === null) return {};
+    var parsed = JSON.parse(v);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    var out = {};
+    CONTINENTS.forEach(function (continent) {
+      if (!Array.isArray(parsed[continent])) return;
+      var seen = {};
+      out[continent] = parsed[continent].filter(function (c) {
+        if (seen[c]) return false;
+        seen[c] = true;
+        return true;
+      });
+    });
+    return out;
+  } catch (e) { return {}; }
+}
+
+function saveSelectedContinents() {
+  try { localStorage.setItem(SELECTED_CONTINENTS_KEY, JSON.stringify(selectedContinents)); } catch (e) {}
+}
+
+function loadSelectedContinents() {
+  try {
+    var v = localStorage.getItem(SELECTED_CONTINENTS_KEY);
+    if (v === null) return CONTINENTS.slice();
+    var parsed = JSON.parse(v);
+    if (!Array.isArray(parsed)) return CONTINENTS.slice();
+    var valid = parsed.filter(function (c) { return CONTINENTS.indexOf(c) !== -1; });
+    return valid.length > 0 ? valid : CONTINENTS.slice();
+  } catch (e) { return CONTINENTS.slice(); }
+}
+
+var continentCountrySelections = loadContinentCountrySelections();
+var selectedContinents = loadSelectedContinents();
+var availableCountriesByContinent = {};
+
+function countriesForContinent(continent) {
+  return availableCountriesByContinent[continent] || [];
+}
+
+function getAllSelectedCountries() {
+  var countries = [];
+  selectedContinents.forEach(function (continent) {
+    var selected = ensureSelectionForContinent(continent);
+    selected.forEach(function (country) {
+      if (countries.indexOf(country) === -1) countries.push(country);
+    });
+  });
+  return countries;
+}
+
+function ensureSelectionForContinent(continent) {
+  var countries = countriesForContinent(continent);
+  if (!countries.length) return Array.isArray(continentCountrySelections[continent]) ? continentCountrySelections[continent] : [];
+  if (!continentCountrySelections.hasOwnProperty(continent) || !Array.isArray(continentCountrySelections[continent])) {
+    continentCountrySelections[continent] = countries.slice();
+  }
+  return continentCountrySelections[continent];
+}
+
+function selectedCountriesForContinent(continent) {
+  var countries = countriesForContinent(continent);
+  if (!countries.length) return Array.isArray(continentCountrySelections[continent]) ? continentCountrySelections[continent].slice() : [];
+  var selected = ensureSelectionForContinent(continent);
+  var seen = {};
+  return selected.filter(function (c) {
+    if (countries.indexOf(c) === -1 || seen[c]) return false;
+    seen[c] = true;
+    return true;
+  });
+}
+
+function toggleContinentSelection(continent) {
+  if (CONTINENTS.indexOf(continent) === -1) return;
+  var idx = selectedContinents.indexOf(continent);
+  if (idx === -1) {
+    selectedContinents.push(continent);
+  } else {
+    selectedContinents.splice(idx, 1);
+  }
+  saveSelectedContinents();
+  ensureSelectionForContinent(continent);
+  renderFilterList();
+}
+
+function pickPuzzleBySelectedContinents() {
+  var countries = getAllSelectedCountries();
+  if (!countries.length) return null;
+  var pool = puzzles.filter(function (p) {
+    return countries.indexOf(p.country) !== -1 && recent.indexOf(p.id) === -1;
+  });
+  if (!pool.length) {
+    pool = puzzles.filter(function (p) {
+      return countries.indexOf(p.country) !== -1;
+    });
+  }
+  if (!pool.length) return null;
+  var p = pool[Math.floor(Math.random() * pool.length)];
+  if (recent.indexOf(p.id) === -1) {
+    recent.push(p.id);
+    if (recent.length > 30) recent.shift();
+  }
+  return p;
+}
+
+function renderFilterSummary() {
+  var elSum = el('continentSummary');
+  if (!elSum) return;
+  if (!selectedContinents.length) {
+    elSum.textContent = 'None selected';
+    return;
+  }
+  var countries = getAllSelectedCountries();
+  var totalAvailable = 0;
+  selectedContinents.forEach(function (continent) {
+    totalAvailable += countriesForContinent(continent).length;
+  });
+  if (!totalAvailable) {
+    elSum.textContent = selectedContinents.join(', ') + ' • loading';
+    return;
+  }
+  elSum.textContent = selectedContinents.join(', ') + ' • ' + (countries.length === totalAvailable ? 'all selected' : (countries.length + '/' + totalAvailable + ' selected'));
+}
+
+function openFilterModal() {
+  var overlay = el('filterOverlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  el('continentBtn').setAttribute('aria-expanded', 'true');
+  renderFilterList();
+  var first = overlay.querySelector('.continent-tab.active') || overlay.querySelector('.continent-tab') || overlay.querySelector('.filter-pill');
+  if (first) first.focus();
+}
+
+function closeFilterModal() {
+  var overlay = el('filterOverlay');
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  el('continentBtn').setAttribute('aria-expanded', 'false');
+  el('continentBtn').focus();
+}
+
+function updateSelectAllButtonText() {
+   var btn = el('selectAllCountriesBtn');
+   if (!btn || !selectedContinents.length) return;
+
+   var allCountriesList = [];
+   var selectedCountriesList = [];
+   selectedContinents.forEach(function (continent) {
+     var allCountries = countriesForContinent(continent);
+     var selected = ensureSelectionForContinent(continent);
+     allCountriesList = allCountriesList.concat(allCountries);
+     selectedCountriesList = selectedCountriesList.concat(selected);
+   });
+
+   var allSelected = allCountriesList.length > 0 && allCountriesList.length === selectedCountriesList.length &&
+     allCountriesList.every(function (c) { return selectedCountriesList.indexOf(c) !== -1; });
+
+   btn.textContent = allSelected ? 'Deselect All' : 'Select All';
+}
+
+function renderFilterList() {
+   renderContinentList();
+   renderCountryList();
+   updateSelectAllButtonText();
+   renderFilterSummary();
+}
+
+function makeFilterButton(value, selected, extraClass) {
+  var btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'filter-pill' + (extraClass ? ' ' + extraClass : '') + (selected ? ' selected' : '');
+  btn.setAttribute('data-value', value);
+  btn.textContent = value;
+  btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  return btn;
+}
+
+function bindToggle(btn, selectedArray, onChange) {
+  btn.addEventListener('click', function () {
+    var v = this.getAttribute('data-value');
+    var idx = selectedArray.indexOf(v);
+    if (idx === -1) {
+      selectedArray.push(v);
+      this.classList.add('selected');
+      this.setAttribute('aria-pressed', 'true');
+    } else {
+      selectedArray.splice(idx, 1);
+      this.classList.remove('selected');
+      this.setAttribute('aria-pressed', 'false');
+    }
+    if (onChange) onChange();
+  });
+}
+
+function renderContinentList() {
+  var list = el('continentList');
+  if (!list) return;
+  list.textContent = '';
+  CONTINENTS.forEach(function (c) {
+    var isSelected = selectedContinents.indexOf(c) !== -1;
+    var btn = makeFilterButton(c, isSelected, 'continent-tab');
+    bindToggle(btn, selectedContinents, function () {
+      saveSelectedContinents();
+      renderFilterList();
+    });
+    list.appendChild(btn);
+  });
+}
+
+function renderCountryList() {
+  var list = el('countryList');
+  if (!list) return;
+  list.textContent = '';
+
+  if (!selectedContinents.length) {
+    var msg = document.createElement('div');
+    msg.style.color = '#7d8899';
+    msg.style.fontSize = '.82rem';
+    msg.textContent = 'Select at least one continent';
+    list.appendChild(msg);
+    return;
+  }
+
+  var allCountries = [];
+  var countryToContinents = {};
+  selectedContinents.forEach(function (continent) {
+    var countries = countriesForContinent(continent);
+    countries.forEach(function (country) {
+      if (!countryToContinents[country]) {
+        allCountries.push(country);
+        countryToContinents[country] = [];
+      }
+      countryToContinents[country].push(continent);
+    });
+  });
+  allCountries.sort();
+
+  if (!allCountries.length) {
+    var msg = document.createElement('div');
+    msg.style.color = '#7d8899';
+    msg.style.fontSize = '.82rem';
+    msg.textContent = 'Loading countries…';
+    list.appendChild(msg);
+    return;
+  }
+
+  allCountries.forEach(function (country) {
+    var isSelected = false;
+    countryToContinents[country].forEach(function (continent) {
+      var selected = ensureSelectionForContinent(continent);
+      if (selected.indexOf(country) !== -1) isSelected = true;
+    });
+
+    var btn = makeFilterButton(country, isSelected, 'country');
+    btn.addEventListener('click', function () {
+      countryToContinents[country].forEach(function (continent) {
+        var selected = ensureSelectionForContinent(continent);
+        var idx = selected.indexOf(country);
+        if (idx === -1) {
+          selected.push(country);
+          btn.classList.add('selected');
+          btn.setAttribute('aria-pressed', 'true');
+        } else {
+          selected.splice(idx, 1);
+          btn.classList.remove('selected');
+          btn.setAttribute('aria-pressed', 'false');
+        }
+      });
+      saveContinentCountrySelections();
+      renderFilterSummary();
+    });
+    list.appendChild(btn);
+  });
+}
+
+function applyFilterFromModal() {
+  saveContinentCountrySelections();
+  saveSelectedContinents();
+  renderFilterSummary();
+  closeFilterModal();
+  newRound();
+}
+
 /* ---------- state ---------- */
 var puzzles = [];   // every landmark, one of which is the round's answer
 var options = [];   // distinct "City, Country" entries the player can guess
@@ -590,19 +1153,43 @@ async function loadData() {
   }
 
   var data = JSON.parse(LZ.decompressFromUTF16(text));
+  console.log("Data is ", data);
   puzzles = data.puzzles.filter(function (p) { return p && p.loc && p.city; });
 
   // Several landmarks share a city, so collapse them for the guess list — the
   // player is naming a city, not a building.
   var seen = {};
   options = [];
+  availableCountriesByContinent = {};
+  CONTINENTS.forEach(function (continent) { availableCountriesByContinent[continent] = []; });
   puzzles.forEach(function (p) {
     var key = label(p).toLowerCase();
     if (seen[key]) return;
     seen[key] = true;
     options.push({ label: label(p), key: key, loc: p.loc });
+
+    var continent = continentForCountry(p.country);
+    if (continent && availableCountriesByContinent[continent] && availableCountriesByContinent[continent].indexOf(p.country) === -1) {
+      availableCountriesByContinent[continent].push(p.country);
+    }
   });
   options.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+   CONTINENTS.forEach(function (continent) {
+     availableCountriesByContinent[continent].sort(function (a, b) { return a.localeCompare(b); });
+     if (!continentCountrySelections.hasOwnProperty(continent)) {
+       continentCountrySelections[continent] = availableCountriesByContinent[continent].slice();
+     } else if (Array.isArray(continentCountrySelections[continent])) {
+       continentCountrySelections[continent] = continentCountrySelections[continent].filter(function (c) {
+         return availableCountriesByContinent[continent].indexOf(c) !== -1;
+       });
+     } else {
+       continentCountrySelections[continent] = availableCountriesByContinent[continent].slice();
+     }
+   });
+
+   if (selectedContinents.length === 0) selectedContinents = CONTINENTS.slice();
+   renderFilterList();
 }
 
 /* ---------- map ---------- */
@@ -958,7 +1545,18 @@ function pickPuzzle() {
 }
 
 function newRound() {
-  answer = pickPuzzle();
+  // If no continents are selected or no countries are selected, use any puzzle. Otherwise, use the selected continents/countries.
+  var selectedCountries = getAllSelectedCountries();
+  if (!selectedCountries.length) {
+    answer = pickPuzzle();
+  } else {
+    answer = pickPuzzleBySelectedContinents();
+    if (!answer) {
+      noteEl.hidden = false;
+      noteEl.textContent = 'No puzzles found for the current filter. Showing a random puzzle.';
+      answer = pickPuzzle();
+    }
+  }
   guesses = [];
   over = false;
   zoomIndex = 0;
@@ -1135,6 +1733,59 @@ el('guessForm').addEventListener('submit', function (e) {
 });
 
 el('againBtn').addEventListener('click', newRound);
+
+var _continentBtn = el('continentBtn');
+if (_continentBtn) _continentBtn.addEventListener('click', function () { openFilterModal(); });
+
+// Wire up modal controls
+var _filterOverlay = el('filterOverlay');
+if (_filterOverlay) {
+  el('filterCancel').addEventListener('click', function () { closeFilterModal(); });
+  el('filterClear').addEventListener('click', function () {
+    selectedContinents.forEach(function (continent) {
+      continentCountrySelections[continent] = [];
+    });
+    saveContinentCountrySelections();
+    renderFilterList();
+    renderFilterSummary();
+  });
+   el('filterApply').addEventListener('click', function () { applyFilterFromModal(); });
+   el('selectAllCountriesBtn').addEventListener('click', function () {
+     // Check if all countries are currently selected
+     var allCountriesList = [];
+     var selectedCountriesList = [];
+     selectedContinents.forEach(function (continent) {
+       var allCountries = countriesForContinent(continent);
+       var selected = ensureSelectionForContinent(continent);
+       allCountriesList = allCountriesList.concat(allCountries);
+       selectedCountriesList = selectedCountriesList.concat(selected);
+     });
+
+     var allSelected = allCountriesList.length > 0 && allCountriesList.length === selectedCountriesList.length &&
+       allCountriesList.every(function (c) { return selectedCountriesList.indexOf(c) !== -1; });
+
+     // Toggle: deselect all if all are selected, otherwise select all
+     selectedContinents.forEach(function (continent) {
+       var allCountries = countriesForContinent(continent);
+       if (allSelected) {
+         continentCountrySelections[continent] = [];
+       } else {
+         continentCountrySelections[continent] = allCountries.slice();
+       }
+     });
+     saveContinentCountrySelections();
+     renderFilterList();
+     updateSelectAllButtonText();
+   });
+   // close overlay when clicking the dimmed area
+   _filterOverlay.addEventListener('click', function (e) { if (e.target === _filterOverlay) closeFilterModal(); });
+   document.addEventListener('keydown', function (e) {
+     if (e.key === 'Escape' && _filterOverlay.style.display === 'flex') closeFilterModal();
+   });
+}
+
+// render initial summary
+renderFilterSummary();
 
 document.addEventListener('keydown', function (e) {
   // Mid-round the guess box has focus, where a "-" is part of a city name.
